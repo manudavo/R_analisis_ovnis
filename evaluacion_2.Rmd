@@ -1,0 +1,344 @@
+---
+title: "análisis ovnis"
+author: "Manuel Davo"
+date: "19/3/2022"
+output:
+  html_document: default
+  pdf_document: default
+editor_options: 
+  chunk_output_type: inline
+---
+
+# ANÁLISIS EN R DE AVISTAMIENTOS OVNI
+
+
+## Introducción
+**El objetivo del trabajo es analizar un conjunto de datos. La sintáxis de dplyr, tidyr, la capacidad gráfica de ggplot2 o la de análisis de data.table será de gran ayuda.**
+**El análisis incluirá elementos numéricos y gráficos.**
+**El análisis debiera de ofrecer detalles de al menos sobre:**  
+**i. Número de avistamientos por año y zona.**  
+**ii. Duración media de los avistamientos, incluyento los tipos.**  
+**iii. En el conjunto como véis hay coordenadas de longitud y latitud, que obviamente se prestan a un análisis geográfico. Como no hemos tratado nada de representación geográfica, podeís ignorar estos campos y centraros en el análisis de la columna país/estado.**  
+**iv. Pero si alguno de vosotros se anima, os recomiendo el paquete ggmap, o el paquete leaflet.**  
+**v. El paquete ggmap desde que Google cambió las condiciones de uso de sus datos geográficos necesita de que os déis de alta en su nube (dando de alta vuestra tarjeta de crédito), pero como en este caso, al disponerse de los valores de longitud/latitud se debiera de poder usar sin problemas. El paquete leaflet no presenta este problema.**  
+**vi. Cualquier otro análisis adicional será valorado.**  
+
+
+## Datos a utilizar
+**Usaremos los datos contenidos en el fichero avist_ovni.csv.**
+**Este fichero contiene un gran conjunto de avistamientos OVNI desde el año 1979 hasta el 2013, que vienen caracterizados por las siguientes variables:**
+**Fecha del avistamiento.**  
+**País/Estado en el que se produce el avistamiento.**  
+**Duración del avistamiento.**  
+**Tipo de avistamiento.**  
+**Fecha en la que se reporta el avistamiento.**  
+**Comentario asociado al avistamiento.**  
+
+
+
+<center> <h1>ANÁLISIS EN R DE AVISTAMIENTOS OVNI</h1> </center>
+
+Tenemos a nuestra disposición un conjunto de datos sobre avistamientos Ovni registrados desde inicios del sible XX, con el proceso de estos datos, vamos a intentar aportar algo de luz sobre el fenómeno Ovni contestando algunas cuestiones como:  
+- ¿Qué parte de nuestro planeta es más visitada por los seres extraterrestres?  
+- Con el paso del tiempo ¿nos visitan más o menos, los seres de otros planetas?  
+- ¿En qué epoca del año, nuestro planeta es más visitado?  
+- ¿Qué tipo de vehículo utilizan los visitantes para llegar a nuestro planeta?  
+
+Comenzamos Realizando un limpieza del entorno de trabajo y cargando todas las librerías que vamos a necesitar.
+
+```{r}
+
+# Limpieza del entorno de trabajo
+rm(list = ls())
+
+# Librerias necesarias
+suppressWarnings(suppressPackageStartupMessages(library(dplyr)))
+suppressWarnings(suppressPackageStartupMessages(library(ggplot2)))
+suppressWarnings(suppressPackageStartupMessages(library(mclust)))
+suppressWarnings(suppressPackageStartupMessages(library(lubridate)))
+suppressWarnings(suppressPackageStartupMessages(library(maps)))
+suppressWarnings(suppressPackageStartupMessages(library(mapdata)))
+
+```
+
+
+A continuación procedemos a cargar los datos aportados en fichero `.csv` con la función `read.csv`. Podemos observar que, como en efecto se apunta en el enunciado de la prueba, se trata de un dataframe con 11 variables, y un total de 88.875 observaciones.
+Para realizar el análisis seleccionamos tan sólo 9 de las 11 variables, dejando fuera del análisis los 'comentarios' (de la cual se podría realizar un análisis de texto) y la 'duración en horas y minutos' (al ser redundante con la variable 'duración en segundos').
+
+```{r}
+# Adquisición de datos
+datos <- read.csv(file="D:/Big Data/miGit/avist_ovni.csv", header=T);
+datos.sel <- datos %>%
+  dplyr::select(latitude,
+                longitude,
+                shape,
+                country,
+                datetime,
+                date.posted,
+                city,
+                state,
+                duration = duration..seconds.)
+       
+str(datos.sel)
+
+```
+
+
+En este paso vamos a realizar las transformaciones necesarias en las variables para poder operar con ellas de manera adecuada, dejamos como variables numéricas:  
+- La duración en segundos  
+- Latitud  
+- Longitud  
+Transformamos las variables de fecha y hora, con la librería `lubridate`.
+Y el resto lo convertimos a factor.  
+
+A continuación visualizamos la estructura para comprobar los cambios con `str()` y realizamos un `summary()` para comprobar los estadísticos básicos, en el propio summary podemos observar los distintos valores 'NAs' que nos pueden dar problemas a la hora de realizar el análisis
+
+```{r warning=FALSE}
+
+# Reestructuración de datos
+datos.sel$latitude <- as.numeric(as.character(datos.sel$latitude));
+datos.sel$longitude <- as.numeric(as.character(datos.sel$longitude));
+datos.sel$duration <- as.numeric(as.character(datos.sel$duration));
+datos.sel$datetime <- mdy_hm(datos.sel$datetime);
+datos.sel$date.posted <- mdy(datos.sel$date.posted);
+datos.sel$country <- as.factor(datos.sel$country);
+datos.sel$shape <- as.factor(datos.sel$shape);
+datos.sel$city <- as.factor(datos.sel$city);
+datos.sel$state <- as.factor(datos.sel$state);
+
+# Visualización
+str(datos.sel)
+summary(datos.sel)
+
+```
+
+
+Procedemos a eliminar los datos omitidos creando un nuevo dataset con datos limpios. Como podemos comprobar, tan sólo se eliminan 703 observaciones, que comparado con la dimensión del dataset inicial (88.875) no supone ni siquiera el 1%. Por lo que consideramos factible la eliminación de tales observaciones sin que afecte significativamente a los resultados.
+Realizamos un nuevo `summary` comprobando que los estadisticos básicos no varían.
+
+```{r}
+
+# Datos sin NAs
+datos.limp <- na.omit(datos.sel);
+
+print('El número de observaciones de datos seleccionados es:')
+nrow(datos.sel)
+print('El número de observaciones de datos limpios es:')
+nrow(datos.limp)
+print('El númerp de observaciones elimindas es de:')
+nrow(datos.sel)-nrow(datos.limp)
+
+summary(datos.limp)
+
+```
+
+Comenzamos el análisis mostrando el número de avistamientos en función de los países.
+
+```{r}
+
+# Avistamientos por países
+levels(datos.limp$country) <- c("Resto", "Australia", "Canada", "Alemania", "Reino Unido", "USA");
+
+# Tabla
+table(datos.limp$country)
+
+# Gráfico
+ggplot(datos.limp, aes(x=reorder(country, country, FUN=length), fill=country)) +
+  stat_count() + 
+  theme_bw() + 
+  scale_fill_brewer(palette="Spectral") +
+  labs(x = "País", y = "Número de avistamientos", 
+     title="Avistamientos de ovnis por país")
+
+```
+
+En el siguiente gráfico podemos ver la densidad de avistamientos a nivel mundial y en función de la fecha.
+
+```{r}
+
+# Densidad de avistamientos a nivel mundial
+ggplot(datos.limp, aes(x=longitude, y=latitude, colour=datetime)) + 
+  borders("world", colour="gray", fill="seashell3") +
+  geom_point(shape=15) +
+  theme_bw() + 
+  labs(x = "Longitud", y = "Latitud", 
+       title="Avistamientos ovni alrededor del mundo")
+
+```
+
+En función de la latitud y longitud, podemos comprobar que la mayor parte corresponde Estados Unidos, seguido de Europa. 
+
+```{r}
+
+# Longitud
+ggplot(datos.limp, aes(longitude)) +
+    geom_histogram(bins = 100) +
+    ggtitle("Densidad de avistamientos por longitud")
+
+# Latitud
+ggplot(datos.limp, aes(latitude)) +
+    geom_histogram(bins = 100) +
+    ggtitle("Densidad de avistamientos por latitud")
+
+```
+
+Estos primero gráficos nos pueden dar respuesta a nuestra primera pregunta, mostrando que la mayor parte de los avistamientos se producen en zona muy pobladas, aunque no podemos afirmar que esta gran densidad de avistamientos se corresponda con una mayor presencia extraterrestre, sina más bien, a que en estas zonas residen más individuos que pueden ver cosas extrañas en el firmamento.
+
+Teniendo en cuenta la fecha de avistamiento, a continuación graficamos los avistamientos en función de su fecha (verde) y de su registro (rojo), comprobamos que los datos se disparan a partir de la década de los 90.
+
+```{r}
+
+# Aistamientos por año 
+avist.anio <- 
+  datos.limp %>% group_by(year=year(datetime)) %>% 
+  summarize(count=n());
+
+# Informes por año
+reports.anio <- 
+  datos.limp %>% group_by(year=year(date.posted)) %>% 
+  summarize(count=n());
+ggplot(avist.anio, aes(x=year, y=count)) + 
+  geom_line(size=1, colour="palegreen4") + 
+  geom_line(data=reports.anio, aes(y=count), size=1, colour="red")
+ 
+```
+
+El gráfico anterior nos da respuesta a nuestra segunda cuestión, con el paso del tiempo, hay un incremento notable del fenómeno Ovni, poniendo de manifiesto que, o nuestro planeta se está poniendo de moda en las visitas interestelares, o lo que se pone de moda es mirar al cielo por cada vez mayor número de personas. 
+
+
+Como hemos podido comprobar, Estados Unidos es con diferencia el país con mayor número de avistamientos, por lo que realizamos un análisis específico de este país
+
+```{r}
+
+## Avistamientos en USA 
+# Extracción datos US
+datos.US <- filter(datos.limp, country=="USA" & !(state %in% c("ak", "hi", "pr")));
+
+# Tabla
+table(datos.US$state)
+
+# Gráfico
+ggplot(datos.US, aes(x=reorder(state, state, FUN=length), fill=state)) + 
+  stat_count() +
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle=45, size=9, hjust=1)) + 
+  labs(x = "Estado", y = "Número de avistamientos", 
+       title="Avistamientos de ovnis en Estados Unidos", 
+       subtitle = "Avistamientos por Estado")
+
+# Avistamientos por fecha
+ggplot(datos.US, aes(x=longitude, y=latitude, colour=datetime)) + 
+  borders("usa", colour="gray", fill="seashell3") +
+  geom_point(shape=15) +
+  theme_bw() + 
+  labs(x = "Longitud", y = "Latitud", 
+       title="Avistamientos en USA en función de la fecha")
+
+```
+
+A continuación realizamos el análisis de los avistamientos dependiendo de la hora del día en la que se realizan. Comprobando que la mayoría de ellos se producen cuando el sol se está poniendo y en las primera horas de la noche.
+
+```{r}
+
+# Tabla hora del día
+table(hour(datos.limp$datetime))
+
+# Gráfico hora
+ggplot(datos.limp, aes(x=hour(datetime))) + 
+  geom_histogram(bins=47, aes(fill=..count..)) +
+  theme_grey() + 
+  scale_fill_gradient(low = "#7AF26E", high = "#2E6A29") +
+  labs(x = "Hora del día", y = "Número de avistamientos", 
+       title="Correlación entre hora del día / avistamientos ovni", 
+       subtitle = "Avistamientos a lo largo del día")
+
+```
+
+Realizamos similar análisis con los días del mes, obteniendo un dato curioso, y es que los días 1 y 15 de cada mes, hay un repunte en los avistamientos.
+
+```{r}
+
+# Tabla día
+tab.dia <- table(mday(datos.limp$datetime))
+tab.dia
+
+# Gráfico día
+ggplot(datos.limp, aes(x=mday(datetime))) + 
+  geom_histogram(bins=61, aes(fill=..count..)) +
+  theme_grey() + 
+  scale_fill_gradient(low = "#F28CA0", high = "#CF222F") +
+  labs(x = "Día del mes", y = "Número de avistamientos", 
+       title="Avistamientos por día")
+```
+
+A continuación realizamos un análisis similar al anterior, pero esta vez teniendo en cuenta el mes del año en el que se producen los avistamientos.  
+La siguiente tabla y gráfico, dan respuesta a nuestra tercera cuestión, revelando que en los meses de verano, los avistamientos Ovni tienen un repunte, este análisis no puede dar respuesta a si dicho repunte se debe a que las visitas de seres extraterrestres son por motivos turísticos, o que los meses de verano son más propicios para los terrícolas a a tumbarse en una hamaca mirando al cielo mientras se produce un aumento de la ingesta de bebidas alcohólicas. Lo que puede desembocar en un lógico incremento de avistamientos Ovni.
+
+```{r}
+
+# Tabla mes
+meses <- c('Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre')
+tab.month <- table(month(datos.limp$datetime))
+rownames(tab.month) <- meses
+tab.month
+
+# Gráfico mes
+ggplot(datos.limp, aes(x=month(datetime))) + 
+  geom_histogram(bins=23, aes(fill=..count..)) +
+  theme_grey() + 
+  scale_fill_gradient(low = "#6999FA", high = "#1A3977") +
+  labs(x = "Mes del año", y = "Número de avistamientos", 
+       title="Avistamientos por mes")
+       
+```
+
+Otra variable que nos aporta el dataframe es la 'forma' que tienen los Ovnis avistados. Podemos hacer una clasificación en función de la forma que presentan estas apariciones. Comprobamos que hay una gran variedad de las mismas, pero la forma más avistada es en forma de 'luz', quedando el típico platillo volante en tercera posición.
+
+```{r}
+
+# Tabla formas por países
+tab.pais.forma <- table(datos.limp$country,datos.limp$shape)
+tab.pais.forma
+
+# Formas de Ovnis más vistas
+ggplot(datos.limp, aes(x=reorder(shape, shape, FUN=length), fill=shape)) + 
+  geom_bar(show.legend=F) +
+  coord_flip() +
+  theme_grey() + 
+  labs(x = "Forma", y = "Número de avistamientos", 
+       title="Formas de OVNI avistados")
+
+```
+
+En el siguiente mapa mundial en función de la forma del avistamiento no parece que haya una correlación entre la zona del avistamiento y la forma del Ovni.
+
+```{r}
+
+# Mapa en función de la forma
+map <- borders("world", colour="black", fill="gray50") 
+ufo_map <- ggplot(datos.limp) + map 
+print(ufo_map + geom_point(aes(x=datos.limp$longitude, y=datos.limp$latitude,color=shape),shape=18) +
+        theme(legend.position = "bottom")+
+        ggtitle("Distribución geográfica en función de la forma"))
+
+```
+
+Estos gráficos anteriores dan respuesta a nuestra última cuestión, que curiosamente nos revela que el vehículo más utilizado por nuestros visitantes, no es el platillo volante, si no que los extraterrestres se decantan por la utilización de triángulos volantes.  
+
+A continuación mostramos un histograma con la duración de los avistamientos, como vemos, Los mayores picos están en 60 y 30 segundos, números redondos que muestran que los avistamientos no se miden de manera científica, si no que estamos ante una percepción humana en lo que a duración se refiere, aún así, podemos afirmar que la mayoría de los avistamientos tienen una duración menor o igual al minuto. 
+
+```{r warning=FALSE}
+
+# Histograma por duración
+ggplot(datos.limp, aes(x = duration)) +
+  geom_histogram(bins = 100, aes(fill=..count..)) +
+  theme_grey() +
+  scale_fill_gradient(low = "#EF8FF1", high = "#C810CB") +
+  scale_x_continuous(limits = c(1,1000)) +
+  labs(x = "Segundos", y = "Número de avistamientos",
+       title="Duración de los avistamientos")
+
+```
+
+
+
